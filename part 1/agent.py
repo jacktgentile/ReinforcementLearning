@@ -34,7 +34,8 @@ class Agent:
         self.s = None
         self.a = None
 
-    def discretize_state(state):
+    # returns environment state variables needed for the algorithm
+    def discretize_state(self, state):
         snake_head_x = state[0]
         snake_head_y = state[1]
         snake_body = state[2]
@@ -93,7 +94,36 @@ class Agent:
         elif snake_head_y == (utils.DISPLAY_SIZE - utils.WALL_SIZE - utils.GRID_SIZE):
             adj_wall_y = 2
         # return values
-        return adj_wall_x, adj_wall_y, food_dir_x, food_dir_y, adj_body_top, adj_body_bottom, adj_body_left, adj_body_right
+        return (adj_wall_x, adj_wall_y, food_dir_x, food_dir_y, adj_body_top, adj_body_bottom, adj_body_left, adj_body_right)
+
+    # find R(s) when training Q table
+    def state_reward(self, state):
+        # TODO return 1 when snake eats food, -1 when snake dies, -0.1 otherwise
+        # is_dead determination taken from move in Snake
+
+        # colliding with the snake body or going backwards while its body length
+        # greater than 1
+        if len(state[2]) >= 1:
+            for seg in state[2]:
+                if state[0] == seg[0] and state[1] == seg[1]:
+                    return -1
+
+        # moving towards body direction, not allowing snake to go backwards while
+        # its body length is 1
+        if len(state[2]) == 1:
+            if state[2][0] == (state[0], state[1]):
+                return -1
+
+        # collide with the wall
+        if (state[0] < utils.GRID_SIZE or state[1] < utils.GRID_SIZE or
+            state[0] + utils.GRID_SIZE > utils.DISPLAY_SIZE-utils.GRID_SIZE or state[1] + utils.GRID_SIZE > utils.DISPLAY_SIZE-utils.GRID_SIZE):
+            return -1
+
+        # check if eating food
+        if state[0] == state[3] and state[1] == state[4]:
+            return 1
+
+        return -0.1
 
     def act(self, state, points, dead):
         '''
@@ -109,28 +139,30 @@ class Agent:
 
         '''
         # calculate environment variables from state
-        adj_wall_x, adj_wall_y, food_dir_x, food_dir_y, adj_body_top,
-            adj_body_bottom, adj_body_left, adj_body_right = discretize_state(state)
+        s_tuple = self.discretize_state(state)
 
         # copy arrays for easy reads
-        N_values = self.N[adj_wall_x,adj_wall_y,food_dir_x,food_dir_y,adj_body_top,adj_body_bottom,adj_body_left,adj_body_right,:]
-        Q_values = self.Q[adj_wall_x,adj_wall_y,food_dir_x,food_dir_y,adj_body_top,adj_body_bottom,adj_body_left,adj_body_right,:]
+        N_values = self.N[s_tuple[0],s_tuple[1],s_tuple[2],s_tuple[3],s_tuple[4],s_tuple[5],s_tuple[6],s_tuple[7],:]
+        Q_values = self.Q[s_tuple[0],s_tuple[1],s_tuple[2],s_tuple[3],s_tuple[4],s_tuple[5],s_tuple[6],s_tuple[7],:]
+        a_start = random.randint(0,3)
         # determine a with max f value according to documentation
-        best_action = self.actions[0]
+        best_action = self.actions[a_start]
         best_f = -1
-        for a in self.actions:
-            cur_f = Q_values[a]
-            if N_values[a] < self.Ne:
+        for a_offset in range(0,4):
+            index = (a_offset + a_start) % 4
+            cur_f = Q_values[index]
+            if N_values[index] < self.Ne:
                 cur_f = 1
             if cur_f > best_f:
-                best_action = a
+                best_action = index
                 best_f = cur_f
         # update N table
-        self.N[adj_wall_x,adj_wall_y,food_dir_x,food_dir_y,adj_body_top,adj_body_bottom,adj_body_left,adj_body_right,best_action] += 1
-        # if training, update Q table values
+        self.N[s_tuple[0],s_tuple[1],s_tuple[2],s_tuple[3],s_tuple[4],s_tuple[5],s_tuple[6],s_tuple[7],best_action] += 1
+        # if training, update Q table values. If not, just return action
         if not self.train:
             return best_action
-        learning_rate = self.C / (self.C + N_values[best_action] + 1)
+        # calculate R(s)
+        reward = self.state_reward(state)
         # determine s' (the next state after best_action is taken)
         if best_action == 0:
             # move up
@@ -144,10 +176,13 @@ class Agent:
         else:
             # move right
             state[0] += utils.GRID_SIZE
-        # recalculate environment vars
-        adj_wall_x, adj_wall_y, food_dir_x, food_dir_y, adj_body_top,
-            adj_body_bottom, adj_body_left, adj_body_right = discretize_state(state)
-        # TODO calculate delta
-        delta = 0
-
+        # recalculate environment variables
+        s_prime = self.discretize_state(state)
+        max_Q = np.amax(self.Q[s_prime[0],s_prime[1],s_prime[2],s_prime[3],s_prime[4],s_prime[5],s_prime[6],s_prime[7],:])
+        # calculate alpha (learning_rate)
+        learning_rate = self.C / (self.C + N_values[best_action] + 1)
+        # calculate delta value and update Q
+        cur_Q = Q_values[best_action]
+        delta = learning_rate * (reward + self.gamma * max_Q - cur_Q)
+        self.Q[s_tuple[0],s_tuple[1],s_tuple[2],s_tuple[3],s_tuple[4],s_tuple[5],s_tuple[6],s_tuple[7],best_action] += delta
         return best_action
